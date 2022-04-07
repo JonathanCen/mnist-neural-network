@@ -27,8 +27,8 @@ class InputLayer:
     def fowardPropagation(self, image, c_label = None, testing = False) -> None:
         self.next_layer.fowardPropagation(image.T, c_label, testing)
 
-    def backwardPropagation(self, forward_pass_data):
-        pass
+    def backwardPropagation(self, backward_pass_data):
+        return
 
 class FullyConnectedLayer:
     def __init__(self, n_neurons, n_incoming_neurons, next_layer = None, previous_layer = None) -> None:
@@ -58,13 +58,19 @@ class FullyConnectedLayer:
         return prediction
 
     def backwardPropagation(self, backward_pass_data) -> None:
-        downstream_deriv = np.matmul(backward_pass_data.T, self.weights)
+        downstream_deriv = (np.matmul(backward_pass_data.T, self.weights)).T
         # downstream_deriv = np.matmul((self.dropout * backward_pass_data).T, self.weights)
-        self.avg_weights_deriv += np.matmul(backward_pass_data, (self.forward_pass_data)) / 100
-        # self.avg_weights_deriv += np.matmul((self.dropout * backward_pass_data), (self.forward_pass_data)) / 100
+        self.avg_weights_deriv += np.matmul(backward_pass_data, self.forward_pass_data.T) / 100
+        # self.avg_weights_deriv += np.matmul((self.dropout * backward_pass_data), self.forward_pass_data.T) / 100
         self.avg_bias_deriv += (backward_pass_data/100)
         #self.avg_bias_deriv += ((backward_pass_data * self.dropout)/100)
         self.previous_layer(downstream_deriv)
+
+    def updateWeightsAndBias(self, learning_rate) -> None:
+        self.weights -= learning_rate * self.avg_weights_deriv
+        self.bias -= learning_rate * self.avg_bias_deriv
+        self.avg_weights_deriv = np.zeros((n_neurons, n_incoming_neurons), dtype=float32)
+        self.avg_bias_deriv = np.zeros((n_neurons, 1), dtype=float32)
 
 
 class SoftMaxLayer:
