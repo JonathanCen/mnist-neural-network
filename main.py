@@ -25,7 +25,7 @@ class InputLayer:
         self.next_layer = next_layer
     
     def fowardPropagation(self, image, c_label = None, testing = False) -> None:
-        self.next_layer.fowardPropagation(image, c_label, testing)
+        self.next_layer.fowardPropagation(image.T, c_label, testing)
 
     def backwardPropagation(self, forward_pass_data):
         pass
@@ -44,7 +44,7 @@ class FullyConnectedLayer:
         self.dropout = droupoutRateLambda(np.random.rand(n_neurons, 1))
 
         self.avg_weights_deriv = np.zeros((n_neurons, n_incoming_neurons), dtype=float32)
-        self.avg_bias_deriv = np.zeros(n_neurons, dtype=float32)
+        self.avg_bias_deriv = np.zeros((n_neurons, 1), dtype=float32)
         self.forward_pass_data = None
 
     def ReLUActivationFunction(self, output):
@@ -52,16 +52,18 @@ class FullyConnectedLayer:
 
     def forwardPropagation(self, forward_pass_data, c_label, testing) -> None:
         self.forward_pass_data = forward_pass_data
-        output = ReLUActivationFunction(np.matmul(self.weights, forward_pass_data.T) + self.bias)
-        # output = ReLUActivationFunction(np.matmul(self.weights, forward_pass_data.T) + self.bias) * self.dropout # can see the performance with dropout
+        output = ReLUActivationFunction(np.matmul(self.weights, forward_pass_data) + self.bias)
+        # output = ReLUActivationFunction(np.matmul(self.weights, forward_pass_data) + self.bias) * self.dropout # can see the performance with dropout
         prediction = self.next_layer.forwardPropagation(output, c_label, testing)
         return prediction
 
     def backwardPropagation(self, backward_pass_data) -> None:
-        downstream_deriv = backward_pass_data.dot(self.weights)
-        transpose_backward_pass_data = backward_pass_data.T
-        self.avg_weights_deriv += (transpose_backward_pass_data.dot(self.forward_pass_data) / 100)
+        downstream_deriv = np.matmul(backward_pass_data.T, self.weights)
+        # downstream_deriv = np.matmul((self.dropout * backward_pass_data).T, self.weights)
+        self.avg_weights_deriv += np.matmul(backward_pass_data, (self.forward_pass_data)) / 100
+        # self.avg_weights_deriv += np.matmul((self.dropout * backward_pass_data), (self.forward_pass_data)) / 100
         self.avg_bias_deriv += (backward_pass_data/100)
+        #self.avg_bias_deriv += ((backward_pass_data * self.dropout)/100)
         self.previous_layer(downstream_deriv)
 
 
@@ -83,13 +85,13 @@ class SoftMaxLayer:
         return self.forward_pass_output
 
     def backwardPropagation(self, backward_pass_data) -> None:
-        downstream_deriv = np.zeros(n_neurons, dtype=float32)
+        downstream_deriv = np.zeros((self.n_neurons, 1), dtype=float32)
         for i in range(self.n_neurons):
-            accum = backward_pass_data[i] * self.forward_pass_output[i] * (1 - self.forward_pass_output[i])
+            accum = backward_pass_data[i][0] * self.forward_pass_output[i] * (1 - self.forward_pass_output[i])
             forward_pass_output_remove_ith_column = np.delete(self.forward_pass_output, i, 1)
-            backward_pass_data_remove_ith_column = np.delete(self.backward_pass_data, i, 1).T
+            backward_pass_data_remove_ith_column = np.delete(self.backward_pass_data, i, 0).T
             accum += forward_pass_output_remove_ith_column.dot(backward_pass_data_remove_ith_column)
-            downstream_deriv[i] += accum
+            downstream_deriv[i][0] += accum
         return downstream_deriv
         
 
@@ -98,9 +100,9 @@ class CrossEntropyLayer:
         self.n_neurons = n_neurons
         self.previous_layer = previous_layer
 
-    def fowardPropagation(self, forward_pass_data, c_label) -> None:
-        downstream_deriv = np.zeros(n_neurons, dtype=float32)
-        downstream_deriv[c_label] = -1/forward_pass_data[c_label]
+    def forwardPropagation(self, forward_pass_data, c_label) -> None:
+        downstream_deriv = np.zeros((n_neurons, 1), dtype=float32)
+        downstream_deriv[c_label][0] = -1/forward_pass_data[c_label][0]
         self.previous_layer.backwardPropagation(downstream_deriv)
 
 def read_int(file_pointer: gzip.GzipFile) -> int:  

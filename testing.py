@@ -19,6 +19,9 @@ def one_hot(Y):
 def dotProduct(X, Y):
 	return X.dot(Y)
 
+def softMax(X):
+	return np.exp(X) / sum(np.exp(X))
+
 if __name__ == '__main__':
 	W1, b1, W2, b2 = init_params()
 	#print('W1: ', W1)
@@ -33,3 +36,9 @@ if __name__ == '__main__':
 	print('Dot product result2: ', res)
 	res += res	
 	print('Dot product res: ', res)
+	print('b1: ', b1)
+	print('b2: ', b2)
+	print('Mult : ', b1 * b2)
+
+	print('X: ', b2)
+	print('softMax, X: ', softMax(b2))
