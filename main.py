@@ -13,6 +13,9 @@ Neural Network Design:
 Input layer: 
 """
 
+# preset the learning_rate, but will allow us to pass in a learning rate
+learning_rate = 0.001
+
 class Neuron:
     def __init__(self) -> None:
         pass
@@ -24,62 +27,81 @@ class InputLayer:
     def fowardPropagation(self, image, c_label = None, testing = False) -> None:
         self.next_layer.fowardPropagation(image, c_label, testing)
 
-    def backwardPropagation(self, input_data):
+    def backwardPropagation(self, forward_pass_data):
         pass
 
 class FullyConnectedLayer:
-    def __init__(self, n_nerons, n_incoming_neurons, next_layer = None, previous_layer = None) -> None:
+    def __init__(self, n_neurons, n_incoming_neurons, next_layer = None, previous_layer = None) -> None:
         self.next_layer = next_layer
         self.previous_layer = previous_layer
-        self.weights = np.random.rand(num_nerons, n_incoming_neurons) - .5
-        self.bias = np.random.rand(n_nerons, 1) - .5
+
+        self.n_neurons = n_neurons
+        self.n_incoming_neurons = n_incoming_neurons
+
+        self.weights = np.random.rand(n_neurons, n_incoming_neurons) - .5
+        self.bias = np.random.rand(n_neurons, 1) - .5
         droupoutRateLambda = lambda x: 1/0.6 if x < 0.6 else 0
-        self.dropout = droupoutRateLambda(np.random.rand(n_nerons, 1))
+        self.dropout = droupoutRateLambda(np.random.rand(n_neurons, 1))
+
+        self.avg_weights_deriv = np.zeros((n_neurons, n_incoming_neurons), dtype=float32)
+        self.avg_bias_deriv = np.zeros(n_neurons, dtype=float32)
+        self.forward_pass_data = None
 
     def ReLUActivationFunction(self, output):
         return np.maximum(0, output)
 
-    def forwardPropagation(self, input_data, c_label, testing) -> None:
-        output = ReLUActivationFunction(self.weights.dot(input_data) + self.bias)
-        # output = ReLUActivationFunction(self.weights.dot(input_data) + self.bias) * self.dropout # can see the performance with dropout
+    def forwardPropagation(self, forward_pass_data, c_label, testing) -> None:
+        self.forward_pass_data = forward_pass_data
+        output = ReLUActivationFunction(np.matmul(self.weights, forward_pass_data.T) + self.bias)
+        # output = ReLUActivationFunction(np.matmul(self.weights, forward_pass_data.T) + self.bias) * self.dropout # can see the performance with dropout
         prediction = self.next_layer.forwardPropagation(output, c_label, testing)
         return prediction
 
-    def backwardPropagation(self, input_data) -> None:
-        pass
-
+    def backwardPropagation(self, backward_pass_data) -> None:
+        downstream_deriv = backward_pass_data.dot(self.weights)
+        transpose_backward_pass_data = backward_pass_data.T
+        self.avg_weights_deriv += (transpose_backward_pass_data.dot(self.forward_pass_data) / 100)
+        self.avg_bias_deriv += (backward_pass_data/100)
+        self.previous_layer(downstream_deriv)
 
 
 class SoftMaxLayer:
-    def __init__(self, n_nerons, next_layer = None, previous_layer = None) -> None:
-        self.n_nerons = n_nerons
+    def __init__(self, n_neurons, next_layer = None, previous_layer = None) -> None:
+        self.n_neurons = n_neurons
         self.next_layer = next_layer
         self.previous_layer = previous_layer
+        self.forward_pass_output = None
     
-    def forwardPropagation(self, input_data, c_label, testing) -> None:
+    def forwardPropagation(self, forward_pass_data, c_label, testing) -> None:
         """ # This is the formula I had when doing CUDA
-        intermediate_output = np.exp(output - max(input_data))
+        intermediate_output = np.exp(output - max(forward_pass_data))
         output = intermediate_output / sum(intermediate_output)
         """
-        output = np.exp(input_data) / sum(np.exp(input_data))
-
+        self.forward_pass_output = np.exp(forward_pass_data) / sum(np.exp(forward_pass_data))
         if not testing:
-            self.next_layer.forwardPropagation(output, c_label)
+            self.next_layer.forwardPropagation(self.forward_pass_output, c_label)
+        return self.forward_pass_output
 
-        return output
-
-    def backwardPropagation(self, input_data) -> None:
-        pass
+    def backwardPropagation(self, backward_pass_data) -> None:
+        downstream_deriv = np.zeros(n_neurons, dtype=float32)
+        for i in range(self.n_neurons):
+            accum = backward_pass_data[i] * self.forward_pass_output[i] * (1 - self.forward_pass_output[i])
+            forward_pass_output_remove_ith_column = np.delete(self.forward_pass_output, i, 1)
+            backward_pass_data_remove_ith_column = np.delete(self.backward_pass_data, i, 1).T
+            accum += forward_pass_output_remove_ith_column.dot(backward_pass_data_remove_ith_column)
+            downstream_deriv[i] += accum
+        return downstream_deriv
+        
 
 class CrossEntropyLayer:
-    def __init__(self, n_nerons, previous_layer = None) -> None:
-        self.n_nerons = n_nerons
+    def __init__(self, n_neurons, previous_layer = None) -> None:
+        self.n_neurons = n_neurons
         self.previous_layer = previous_layer
 
-    def fowardPropagation(self, input_data, c_label) -> None:
-        output = np.empty(n_nerons, dtype=float32)
-        output[c_label] = -1/input_data[c_label]
-        self.previous_layer.backwardPropagation(output)
+    def fowardPropagation(self, forward_pass_data, c_label) -> None:
+        downstream_deriv = np.zeros(n_neurons, dtype=float32)
+        downstream_deriv[c_label] = -1/forward_pass_data[c_label]
+        self.previous_layer.backwardPropagation(downstream_deriv)
 
 def read_int(file_pointer: gzip.GzipFile) -> int:  
     """ Returns the int of the first 4 bytes
@@ -100,7 +122,7 @@ def read_training_data_slow(training_image_path: str, training_label_path: str) 
         reader.read(4) # Read past the magic number
         n_images, n_rows, n_cols = read_int(reader), read_int(reader), read_int(reader)
 
-        training_images = np.empty((n_rows, n_cols, n_images), dtype=np.float16)
+        training_images = np.zero((n_rows, n_cols, n_images), dtype=np.float16)
 
         for i in range(n_images):
             buf = reader.read(n_rows * n_cols)
