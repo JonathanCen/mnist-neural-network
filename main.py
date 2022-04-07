@@ -15,15 +15,14 @@ Input layer:
 
 class Neuron:
     def __init__(self) -> None:
-        #self.weights = np.empty(, dtype=np.float(16))
         pass
 
 class InputLayer:
     def __init__(self, next_layer = None) -> None:
         self.next_layer = next_layer
     
-    def fowardPropagation(self, image, testing = False) -> None:
-        self.next_layer.fowardPropagation(image, testing)
+    def fowardPropagation(self, image, c_label = None, testing = False) -> None:
+        self.next_layer.fowardPropagation(image, c_label, testing)
 
     def backwardPropagation(self, input_data):
         pass
@@ -40,10 +39,10 @@ class FullyConnectedLayer:
     def ReLUActivationFunction(self, output):
         return np.maximum(0, output)
 
-    def forwardPropagation(self, input_data, testing) -> None:
+    def forwardPropagation(self, input_data, c_label, testing) -> None:
         output = ReLUActivationFunction(self.weights.dot(input_data) + self.bias)
-        # output = ReLUActivationFunction(self.weights.dot(input_data) + self.bias) * self.dropout
-        prediction = self.next_layer.forwardPropagation(output, testing)
+        # output = ReLUActivationFunction(self.weights.dot(input_data) + self.bias) * self.dropout # can see the performance with dropout
+        prediction = self.next_layer.forwardPropagation(output, c_label, testing)
         return prediction
 
     def backwardPropagation(self, input_data) -> None:
@@ -52,13 +51,35 @@ class FullyConnectedLayer:
 
 
 class SoftMaxLayer:
-    def __init__(self, next_layer = None, previous_layer = None) -> None:
+    def __init__(self, n_nerons, next_layer = None, previous_layer = None) -> None:
+        self.n_nerons = n_nerons
         self.next_layer = next_layer
         self.previous_layer = previous_layer
+    
+    def forwardPropagation(self, input_data, c_label, testing) -> None:
+        """ # This is the formula I had when doing CUDA
+        intermediate_output = np.exp(output - max(input_data))
+        output = intermediate_output / sum(intermediate_output)
+        """
+        output = np.exp(input_data) / sum(np.exp(input_data))
+
+        if not testing:
+            self.next_layer.forwardPropagation(output, c_label)
+
+        return output
+
+    def backwardPropagation(self, input_data) -> None:
+        pass
 
 class CrossEntropyLayer:
-    def __init__(self) -> None:
-        pass
+    def __init__(self, n_nerons, previous_layer = None) -> None:
+        self.n_nerons = n_nerons
+        self.previous_layer = previous_layer
+
+    def fowardPropagation(self, input_data, c_label) -> None:
+        output = np.empty(n_nerons, dtype=float32)
+        output[c_label] = -1/input_data[c_label]
+        self.previous_layer.backwardPropagation(output)
 
 def read_int(file_pointer: gzip.GzipFile) -> int:  
     """ Returns the int of the first 4 bytes
