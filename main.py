@@ -2,6 +2,8 @@ from mlxtend.data import loadlocal_mnist
 import platform
 import sys
 import numpy as np
+import random
+import timer
 
 import gzip
 
@@ -27,7 +29,7 @@ class InputLayer:
     def fowardPropagation(self, image, c_label = None, testing = False) -> None:
         self.next_layer.fowardPropagation(image.T, c_label, testing)
 
-    def backwardPropagation(self, backward_pass_data):
+    def backwardPropagation(self, backward_pass_data) -> None:
         return
 
 class FullyConnectedLayer:
@@ -154,24 +156,63 @@ def read_training_data_slow(training_image_path: str, training_label_path: str) 
 
     return training_images, training_labels
 
+def connect_layers(list_layers) -> None:
+    for i in range(len(list_layers)):
+        if i - 1 > -1:
+            list_layers[i].previous_layer = list_layers[i-1]
+
+        if i + 1 < len(list_layers):
+            list_layers[i].next_layer = list_layers[i+1]
 
 
-
-def train_neural_network(training_images, training_labels) -> None:
+def train_neural_network(training_images, training_labels, epochs) -> None:
     # Construct the Neural Network
-    input_layer = InputLayer(28, 28, 1)
+    input_layer = InputLayer()
+    first_fully_connected_layer = FullyConnectedLayer(1024, 784)
+    output_layer = FullyConnectedLayer(10, 1024)
+    softmax_layer = SoftMaxLayer(10)
+    cross_entropy_layer = CrossEntropyLayer(10)
+    list_layers = [input_layer, first_fully_connected_layer, output_layer, softmax_layer, cross_entropy_layer]
+
+    # Connect the layers
+    connect_layers(list_layers)
+
+
+    for epoch in range(epochs):
+        print(f"\n----------------------- STARTING EPOCH {epoch} -------------------\n";
+        start_time = time.perf_counter()
+
+        for c_round in range(600):
+            # test the neural network every 100 rounds for each epoch
+            if c_round % 100 == 0:
+                corrects = 0
+                for iter in range(10000):
+                    random_test = random.randint(0, training_images.shape[0])
+                    prediction = input_layer.fowardPropagation(training_images[index], None, True)
+                    if prediction == training_labels[random_test]: corrects += 1
+                print(f"Epoch {epoch}: Round {c_round:5d}: accuracy={(correct/10000.0):0.6f}\n")
+            
+            # continue to train the neural network
+            for iter in range(100):
+                index = (c_round * 100) + iter
+                input_layer.fowardPropagation(training_images[index], training_labels[index])
+
+        end_time = time.perf_counter()
+        print(f"This epoch took: {(end_time - start_time):0.6f}\n")
 
 
 
 
-def main() -> None:
+
+
+def main() None:
     """
     if (len(sys.argv) < 5):
         print("Too few args. Pass in ./program training_image_file training_label_file test_image_file test_label_file")
         return 
     """
     
-    training_image_path, training_label_path = sys.argv[1], sys.argv[2]
+    training_image_path, training_label_path, epochs = sys.argv[1], sys.argv[2], 20
 
     # Read in training data
     training_images, training_labels = read_training_data(training_image_path, training_label_path)
