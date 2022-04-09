@@ -81,9 +81,9 @@ class FullyConnectedLayer:
         end = time.perf_counter()
         if c_label:
             if self.n_neurons == 1024:
-                accum_time_FCL1_forward_prop += (end - start)/(1200000)
+                accum_time_FCL1_forward_prop += (end - start)
             else:
-                accum_time_FCL2_forward_prop += (end - start)/(1200000)
+                accum_time_FCL2_forward_prop += (end - start)
         prediction = self.next_layer.forward_propagation(output, c_label)
         return prediction
 
@@ -102,9 +102,9 @@ class FullyConnectedLayer:
             self.avg_bias_deriv += (backward_pass_data * self.dropout)/100
         end = time.perf_counter()
         if self.n_neurons == 1024:
-            accum_time_FCL1_backward_prop += (end - start)/(1200000)
+            accum_time_FCL1_backward_prop += (end - start)
         else:
-            accum_time_FCL2_backward_prop += (end - start)/(1200000)
+            accum_time_FCL2_backward_prop += (end - start)
         self.previous_layer.backward_propagation(downstream_deriv)
 
     def update_weights_and_bias(self, learning_rate) -> None:
@@ -136,7 +136,7 @@ class SoftMaxLayer:
         end = time.perf_counter()
         if c_label:
             self.next_layer.forward_propagation(self.forward_pass_output, c_label)
-            accum_time_SML_forward_prop += (end-start)/(1200000)
+            accum_time_SML_forward_prop += (end-start)
         return self.extract_prediction()
 
     def backward_propagation(self, backward_pass_data) -> None:
@@ -150,7 +150,7 @@ class SoftMaxLayer:
             accum += (backward_pass_data_remove_ith_column.dot(forward_pass_output_remove_ith_column) * -self.forward_pass_output[i][0])
             downstream_deriv[i][0] += accum
         end = time.perf_counter()
-        accum_time_SML_backward_prop += (end-start)/(1200000)
+        accum_time_SML_backward_prop += (end-start)
         self.previous_layer.backward_propagation(downstream_deriv)
         
 
@@ -165,7 +165,7 @@ class CrossEntropyLayer:
         downstream_deriv = np.zeros((self.n_neurons, 1), dtype=np.float64)
         downstream_deriv[c_label][0] = -1/forward_pass_data[c_label][0]
         end = time.perf_counter()
-        accum_time_CEL_forward_prop += (end-start)/(1200000)
+        accum_time_CEL_forward_prop += (end-start)
         self.previous_layer.backward_propagation(downstream_deriv)
 
 def read_int(file_pointer: gzip.GzipFile) -> int:  
@@ -221,6 +221,17 @@ def read_training_data_slow(training_image_path: str, training_label_path: str) 
     print('Finishing processing training labels')
 
     return training_images, training_labels
+
+def print_current_metrics(epoch) -> None:
+    print("\nSome stats:")
+    print(f"avg_time_FCL1_forward_prop: {accum_time_FCL1_forward_prop/(epoch * 60000)}")
+    print(f"avg_time_FCL2_forward_prop: {accum_time_FCL2_forward_prop/(epoch * 60000)}")
+    print(f"avg_time_FCL1_backward_prop: {accum_time_FCL1_backward_prop/(epoch * 60000)}")
+    print(f"avg_time_FCL2_backward_prop: {accum_time_FCL2_backward_prop/(epoch * 60000)}")
+    print(f"avg_time_SML_forward_prop: {accum_time_SML_forward_prop/(epoch * 60000)}")
+    print(f"avg_time_SML_backward_prop: {accum_time_SML_backward_prop/(epoch * 60000)}")
+    print(f"avg_time_CEL_forward_prop: {accum_time_CEL_forward_prop/(epoch * 60000)}")
+
 
 def connect_layers(list_layers) -> None:
     for i in range(len(list_layers)):
@@ -294,9 +305,10 @@ def train_neural_network(training_images, training_labels, epochs, learning_rate
             
             first_fully_connected_layer.update_weights_and_bias(learning_rate)
             output_layer.update_weights_and_bias(learning_rate)
-            
+
         end_time = time.perf_counter()
         print(f"This epoch took: {(end_time - start_time):0.6f}\n")
+        print_current_metrics(epoch)
 
 
     return input_layer
@@ -336,15 +348,6 @@ def main() -> None:
     print("Starting to train the neural network")
     neural_network = train_neural_network(training_images, training_labels, epochs)
     print("Finish training the neural network")
-
-    print("\nSome stats:")
-    print(f"avg_time_FCL1_forward_prop: {accum_time_FCL1_forward_prop}")
-    print(f"avg_time_FCL2_forward_prop: {accum_time_FCL2_forward_prop}")
-    print(f"avg_time_FCL1_backward_prop: {accum_time_FCL1_backward_prop}")
-    print(f"avg_time_FCL2_backward_prop: {accum_time_FCL2_backward_prop}")
-    print(f"avg_time_SML_forward_prop: {accum_time_SML_forward_prop}")
-    print(f"avg_time_SML_backward_prop: {accum_time_SML_backward_prop}")
-    print(f"avg_time_CEL_forward_prop: {accum_time_CEL_forward_prop}")
 
     # Test the Neural Network
     print("\nStarting to test the neural network on testing data")
