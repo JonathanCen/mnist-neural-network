@@ -27,12 +27,12 @@ class InputLayer:
         self.n_neurons = n_neurons
         self.next_layer = next_layer
     
-    def forward_propagation(self, image, c_label = None, testing = False) -> None:
+    def forward_propagation(self, image, c_label = None) -> None:
         # start = time.perf_counter()
         image = image.reshape((self.n_neurons, 1))
         # end = time.perf_counter()
         # print(f'Reshaping image: {end - start}')
-        return self.next_layer.forward_propagation(image, c_label, testing)
+        return self.next_layer.forward_propagation(image, c_label)
 
     def backward_propagation(self, backward_pass_data) -> None:
         return
@@ -57,14 +57,14 @@ class FullyConnectedLayer:
     def ReLU_activation_function(self, output):
         return np.maximum(0, output)
 
-    def forward_propagation(self, forward_pass_data, c_label, testing) -> None:
+    def forward_propagation(self, forward_pass_data, c_label) -> None:
         # start_time = time.perf_counter()
         self.forward_pass_data = forward_pass_data
         output = self.ReLU_activation_function(np.matmul(self.weights, forward_pass_data) + self.bias)
         # end_time = time.perf_counter()
         # print(f'FullyConnectedLayer {1 if self.n_neurons == 1024 else 2} took: {end_time - start_time}')
         # output = self.ReLU_activation_function(np.matmul(self.weights, forward_pass_data) + self.bias) * self.dropout # can see the performance with dropout
-        prediction = self.next_layer.forward_propagation(output, c_label, testing)
+        prediction = self.next_layer.forward_propagation(output, c_label)
         return prediction
 
     def backward_propagation(self, backward_pass_data) -> None:
@@ -74,13 +74,16 @@ class FullyConnectedLayer:
         # self.avg_weights_deriv += np.matmul((self.dropout * backward_pass_data), self.forward_pass_data.T) / 100
         self.avg_bias_deriv += (backward_pass_data/100)
         #self.avg_bias_deriv += ((backward_pass_data * self.dropout)/100)
-        self.previous_layer(downstream_deriv)
+        self.previous_layer.backward_propagation(downstream_deriv)
 
     def update_weights_and_bias(self, learning_rate) -> None:
+        # print("updating weights and bias")
+        # print(f"Avg weights deriv: {self.avg_weights_deriv}")
+        # print(f"Avg bias deriv: {self.avg_bias_deriv}")
         self.weights -= learning_rate * self.avg_weights_deriv
         self.bias -= learning_rate * self.avg_bias_deriv
-        self.avg_weights_deriv = np.zeros((n_neurons, n_incoming_neurons), dtype=np.float64)
-        self.avg_bias_deriv = np.zeros((n_neurons, 1), dtype=np.float64)
+        self.avg_weights_deriv = np.zeros((self.n_neurons, self.n_incoming_neurons), dtype=np.float64)
+        self.avg_bias_deriv = np.zeros((self.n_neurons, 1), dtype=np.float64)
 
 
 class SoftMaxLayer:
@@ -93,7 +96,7 @@ class SoftMaxLayer:
     def extract_prediction(self):
         return self.forward_pass_output.argmax()
     
-    def forward_propagation(self, forward_pass_data, c_label, testing) -> None:
+    def forward_propagation(self, forward_pass_data, c_label) -> None:
         """ # This is the formula I had when doing CUDA
         # self.forward_pass_output = np.exp(forward_pass_data) / sum(np.exp(forward_pass_data))
         # print(self.forward_pass_output)/
@@ -103,19 +106,19 @@ class SoftMaxLayer:
         self.forward_pass_output = intermediate_output / sum(intermediate_output)
         # end_time = time.perf_counter()
         # print(f'SoftMaxLayer took: {end_time - start_time}')
-        if not testing:
+        if c_label != None:
             self.next_layer.forward_propagation(self.forward_pass_output, c_label)
         return self.extract_prediction()
 
     def backward_propagation(self, backward_pass_data) -> None:
         downstream_deriv = np.zeros((self.n_neurons, 1), dtype=np.float64)
         for i in range(self.n_neurons):
-            accum = backward_pass_data[i][0] * self.forward_pass_output[i] * (1 - self.forward_pass_output[i])
-            forward_pass_output_remove_ith_column = np.delete(self.forward_pass_output, i, 1)
-            backward_pass_data_remove_ith_column = np.delete(self.backward_pass_data, i, 0).T
-            accum += forward_pass_output_remove_ith_column.dot(backward_pass_data_remove_ith_column)
+            accum = backward_pass_data[i][0] * self.forward_pass_output[i][0] * (1 - self.forward_pass_output[i][0])
+            forward_pass_output_remove_ith_column = np.delete(self.forward_pass_output, i, 0)
+            backward_pass_data_remove_ith_column = np.delete(backward_pass_data, i, 0).T
+            accum += (backward_pass_data_remove_ith_column.dot(forward_pass_output_remove_ith_column) * -self.forward_pass_output[i][0])
             downstream_deriv[i][0] += accum
-        return downstream_deriv
+        self.previous_layer.backward_propagation(downstream_deriv)
         
 
 class CrossEntropyLayer:
@@ -185,17 +188,20 @@ def connect_layers(list_layers) -> None:
             list_layers[i].next_layer = list_layers[i+1]
 
 
-def train_neural_network(training_images, training_labels, epochs) -> None:
+def train_neural_network(training_images, training_labels, epochs, learning_rate = 0.001) -> None:
     # Construct the Neural Network
     input_layer = InputLayer(784)
     first_fully_connected_layer = FullyConnectedLayer(1024, 784)
     output_layer = FullyConnectedLayer(10, 1024)
     softmax_layer = SoftMaxLayer(10)
     cross_entropy_layer = CrossEntropyLayer(10)
+
     list_layers = [input_layer, first_fully_connected_layer, output_layer, softmax_layer, cross_entropy_layer]
 
     # Connect the layers
     connect_layers(list_layers)
+
+    """
     start_time = time.perf_counter()
     n_corrects = 0
     for iter in range(10000):
@@ -207,8 +213,8 @@ def train_neural_network(training_images, training_labels, epochs) -> None:
     print(f"Epoch 1: Round 1: accuracy={(n_corrects/10000.0):0.6f}\n")
     end_time = time.perf_counter()
     print(f"This test took: {(end_time - start_time):0.6f}\n")
-
     """
+
     for epoch in range(epochs):
         print(f"\n----------------------- STARTING EPOCH {epoch} -------------------\n")
         start_time = time.perf_counter()
@@ -218,19 +224,22 @@ def train_neural_network(training_images, training_labels, epochs) -> None:
             if c_round % 100 == 0:
                 n_corrects = 0
                 for iter in range(10000):
-                    random_test = random.randint(0, training_images.shape[0])
-                    prediction = input_layer.forward_propagation(training_images[random_test], None, True)
+                    random_test = random.randint(0, training_images.shape[0]-1)
+                    prediction = input_layer.forward_propagation(training_images[random_test], None)
                     if prediction == training_labels[random_test]: n_corrects += 1
-                print(f"Epoch {epoch}: Round {c_round:5d}: accuracy={(n_corrects/10000.0):0.6f}\n")
+                print(f"Epoch {epoch}: Round {c_round:5d}: accuracy={(n_corrects/10000.0):0.6f}")
             
             # continue to train the neural network
             for iter in range(100):
-                index = (c_round * 100) + iter
-                input_layer.forward_propagation(training_images[index], training_labels[index])
+                training_index = (c_round * 100) + iter
+                input_layer.forward_propagation(training_images[training_index], training_labels[training_index])
+            
+            first_fully_connected_layer.update_weights_and_bias(learning_rate)
+            output_layer.update_weights_and_bias(learning_rate)
+            
 
         end_time = time.perf_counter()
         print(f"This epoch took: {(end_time - start_time):0.6f}\n")
-        """
 
 
 
