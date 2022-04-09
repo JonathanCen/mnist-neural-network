@@ -135,8 +135,8 @@ class SoftMaxLayer:
         self.forward_pass_output = intermediate_output / sum(intermediate_output)
         end = time.perf_counter()
         if c_label:
-            self.next_layer.forward_propagation(self.forward_pass_output, c_label)
             accum_time_SML_forward_prop += (end-start)
+            self.next_layer.forward_propagation(self.forward_pass_output, c_label)
         return self.extract_prediction()
 
     def backward_propagation(self, backward_pass_data) -> None:
