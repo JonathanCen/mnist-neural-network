@@ -284,6 +284,10 @@ def train_neural_network(training_images, training_labels, epochs, learning_rate
     """
 
     for epoch in range(epochs):
+
+        # shuffle the training images and labels 
+        permuatation_of_indices = np.random.permutation(training_images.shape[0])
+
         print(f"\n----------------------- STARTING EPOCH {epoch} -------------------\n")
         start_time = time.perf_counter()
 
@@ -300,7 +304,7 @@ def train_neural_network(training_images, training_labels, epochs, learning_rate
             # continue to train the neural network
             for iter in range(100):
                 first_fully_connected_layer.generate_dropout()
-                training_index = (c_round * 100) + iter
+                training_index = permuatation_of_indices[(c_round * 100) + iter]
                 input_layer.forward_propagation(training_images[training_index], training_labels[training_index])
             
             first_fully_connected_layer.update_weights_and_bias(learning_rate)
@@ -308,7 +312,7 @@ def train_neural_network(training_images, training_labels, epochs, learning_rate
 
         end_time = time.perf_counter()
         print(f"This epoch took: {(end_time - start_time):0.6f}\n")
-        print_current_metrics(epoch)
+        print_current_metrics(epoch+1)
 
 
     return input_layer
