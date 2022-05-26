@@ -11,12 +11,11 @@ import matplotlib.pyplot as plt
 
 """
 Neural Network Design:
-
-Input layer: 
 """
 
 # preset the learning_rate, but will allow us to pass in a learning rate
-learning_rate = 0.001
+learning_rate, batch_size = 0.001, 100
+
 
 # timing how long each operation takes
 accum_time_FCL1_forward_prop = 0
@@ -55,7 +54,7 @@ class FullyConnectedLayer:
 
         self.weights = np.random.rand(n_neurons, n_incoming_neurons) - .5
         self.bias = np.random.rand(n_neurons, 1) - .5
-        self.dropout = None
+        self.dropout = np.array(list(map(lambda x: 1/0.6 if x < 0.6 else 0, np.random.rand(n_neurons)))).reshape((n_neurons, 1))
 
         self.avg_weights_deriv = np.zeros((n_neurons, n_incoming_neurons), dtype=np.float64)
         self.avg_bias_deriv = np.zeros((n_neurons, 1), dtype=np.float64)
@@ -69,28 +68,29 @@ class FullyConnectedLayer:
         return np.maximum(0, output)
 
     def forward_propagation(self, forward_pass_data, c_label) -> None:
-        global accum_time_FCL1_forward_prop
+        global accum_time_FCL1_forward_prop 
         global accum_time_FCL2_forward_prop
+
         start = time.perf_counter()
         self.forward_pass_data = forward_pass_data
-        output = np.matmul(self.weights, forward_pass_data)
+        output = np.matmul(self.weights, forward_pass_data) + self.bias # allow there to be bias when testing and training data
         if not self.is_output_layer:
-            output = self.ReLU_activation_function(output + self.bias)
-            if c_label:
-                output *= self.dropout 
+            output = self.ReLU_activation_function(output)
+            if c_label: output *= self.dropout 
         end = time.perf_counter()
+
         if c_label:
-            if self.n_neurons == 1024:
+            if not self.is_output_layer:
                 accum_time_FCL1_forward_prop += (end - start)
             else:
                 accum_time_FCL2_forward_prop += (end - start)
-        prediction = self.next_layer.forward_propagation(output, c_label)
-        return prediction
+
+        return self.next_layer.forward_propagation(output, c_label)
 
     def backward_propagation(self, backward_pass_data) -> None:
         global accum_time_FCL1_backward_prop
         global accum_time_FCL2_backward_prop
-        start = time.perf_counter()
+        """
         if self.is_output_layer:
             # downstream_deriv = (np.matmul(backward_pass_data.T, self.weights)).T
             downstream_deriv = np.matmul(self.weights.T, backward_pass_data)
@@ -100,18 +100,26 @@ class FullyConnectedLayer:
             downstream_deriv = np.matmul(self.weights.T, self.dropout * backward_pass_data) # currently not needed
             self.avg_weights_deriv += np.matmul((self.dropout * backward_pass_data), self.forward_pass_data.T)/100
             self.avg_bias_deriv += (backward_pass_data * self.dropout)/100
+        """
+
+        start = time.perf_counter()
+        downstream_deriv = np.matmul(self.weights.T, backward_pass_data)
+        self.avg_weights_deriv += np.matmul(backward_pass_data, self.forward_pass_data.T)/batch_size
+        self.avg_bias_deriv += (backward_pass_data/batch_size)
         end = time.perf_counter()
-        if self.n_neurons == 1024:
+
+        if not self.is_output_layer:
             accum_time_FCL1_backward_prop += (end - start)
         else:
             accum_time_FCL2_backward_prop += (end - start)
+
         self.previous_layer.backward_propagation(downstream_deriv)
 
     def update_weights_and_bias(self, learning_rate) -> None:
         self.weights -= learning_rate * self.avg_weights_deriv
         self.bias -= learning_rate * self.avg_bias_deriv
-        self.avg_weights_deriv = np.zeros((self.n_neurons, self.n_incoming_neurons), dtype=np.float64)
-        self.avg_bias_deriv = np.zeros((self.n_neurons, 1), dtype=np.float64)
+        self.avg_weights_deriv = self.avg_weights_deriv.fill(0)
+        self.avg_bias_deriv = self.avg_bias_deriv.fill(0)
 
 
 class SoftMaxLayer:
@@ -174,7 +182,8 @@ def read_int(file_pointer: gzip.GzipFile) -> int:
     return int.from_bytes(file_pointer.read(4), "big")
 
 def normalize_images(images) -> np.ndarray:
-    normalizerLambda = lambda x: (x/127.5) - 1
+    # normalizerLambda = lambda x: (x/127.5) - 1
+    normalizerLambda = lambda x : x/255
     return np.array(list(map(normalizerLambda, images)))
 
 def read_training_data() -> (np.ndarray, np.ndarray):
@@ -245,8 +254,8 @@ def connect_layers(list_layers) -> None:
 def train_neural_network(training_images, training_labels, epochs, learning_rate = 0.001) -> None:
     # Construct the Neural Network
     input_layer = InputLayer(784)
-    first_fully_connected_layer = FullyConnectedLayer(1024, 784)
-    output_layer = FullyConnectedLayer(10, 1024, True)
+    first_fully_connected_layer = FullyConnectedLayer(128, 784)
+    output_layer = FullyConnectedLayer(10, 128, True)
     softmax_layer = SoftMaxLayer(10)
     cross_entropy_layer = CrossEntropyLayer(10)
 
@@ -303,7 +312,7 @@ def train_neural_network(training_images, training_labels, epochs, learning_rate
             
             # continue to train the neural network
             for iter in range(100):
-                first_fully_connected_layer.generate_dropout()
+                # first_fully_connected_layer.generate_dropout()
                 training_index = permuatation_of_indices[(c_round * 100) + iter]
                 input_layer.forward_propagation(training_images[training_index], training_labels[training_index])
             
@@ -312,7 +321,7 @@ def train_neural_network(training_images, training_labels, epochs, learning_rate
 
         end_time = time.perf_counter()
         print(f"This epoch took: {(end_time - start_time):0.6f}\n")
-        print_current_metrics(epoch+1)
+        # print_current_metrics(epoch+1)
 
 
     return input_layer
@@ -330,12 +339,8 @@ def test_neural_network(testing_images, testing_labels, neural_network) -> None:
 
 
 def main() -> None:
-    """
-    if (len(sys.argv) < 5):
-        print("Too few args. Pass in ./program training_image_file training_label_file test_image_file test_label_file")
-        return 
-    """
-    
+    print("Without dropout at all.")
+
     # training_image_path, training_label_path, epochs = sys.argv[1], sys.argv[2], 20
     epochs = 20
     
