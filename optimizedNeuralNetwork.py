@@ -44,14 +44,14 @@ class InputLayer:
     # training - pass in the (shuffled) train images to the next layer
     # testing - pass in the testing images to the next layer
     def forward_propagation(self, test_image = None, is_training = True) -> int:
-        start_time = time.perf_counter()
-        global train_images, train_labels
+        # start_time = time.perf_counter()
+        # global train_images, train_labels
         if is_training:
             train_data = self.train_data[self.train_data_index : self.train_data_index + batch_size]
             train_images = np.array(list(map(lambda x : x[0], train_data))).reshape((batch_size, 784, 1))
             train_labels = np.array(list(map(lambda x : x[1], train_data)))
             self.train_data_index += batch_size
-        end_time = time.perf_counter()
+        # end_time = time.perf_counter()
         # print(f'Input layer took: {end_time - start_time}')
         return self.next_layer.forward_propagation(train_images, is_training) if is_training else self.next_layer.forward_propagation(test_image, is_training)
 
@@ -212,13 +212,13 @@ def read_training_data() -> (np.ndarray, np.ndarray):
     training_images, training_labels = loadlocal_mnist(
         images_path='./mnist/train-images-idx3-ubyte', 
         labels_path='./mnist/train-labels-idx1-ubyte')
-    return normalize_images(training_images), training_labels
+    return training_images/255, training_labels
 
 def read_testing_data() -> (np.ndarray, np.ndarray):
     testing_images, testing_labels = loadlocal_mnist(
         images_path='./mnist/t10k-images-idx3-ubyte', 
         labels_path='./mnist/t10k-labels-idx1-ubyte')
-    return normalize_images(testing_images), testing_labels
+    return testing_images/255, testing_labels
 
 def read_training_data_slow(training_image_path: str, training_label_path: str) -> None:
     # Process the training images
@@ -260,13 +260,13 @@ def connect_layers(list_layers) -> None:
             list_layers[i].next_layer = list_layers[i+1]
 
 
-def train_neural_network(train_images, train_labels, train_data, epochs, learning_rate = 0.001) -> None:
+def train_neural_network(train_images, train_labels, train_data, epochs, n_neurons, learning_rate = 0.001) -> None:
     global batch_size
 
     # Construct the Neural Network
     input_layer = InputLayer(train_data)
-    first_fully_connected_layer = FullyConnectedLayer(128, 784)
-    output_layer = FullyConnectedLayer(10, 128, True)
+    first_fully_connected_layer = FullyConnectedLayer(n_neurons, 784)
+    output_layer = FullyConnectedLayer(10, n_neurons, True)
     softmax_layer = SoftMaxLayer(10)
     cross_entropy_layer = CrossEntropyLayer(10)
 
@@ -295,6 +295,7 @@ def train_neural_network(train_images, train_labels, train_data, epochs, learnin
                     if prediction == train_labels[random_test]: n_corrects += 1
                 print(f"Epoch {epoch}: Round {c_round:5d}: accuracy={(n_corrects/10000.0):0.6f}")
                 batch_size = 100
+                
             # train the neural network
             input_layer.forward_propagation()
 
@@ -315,21 +316,22 @@ def main() -> None:
     """
     
     # training_image_path, training_label_path, epochs = sys.argv[1], sys.argv[2], 20
-    epochs = 20
+    epochs, n_neurons = 20, 128
     
     start = time.perf_counter()
     # Read in training data
-    print("Starting to read training data for the neural network")
+    print(f"Starting to read training and testing data for the neural network with {n_neurons} neurons")
     train_images, train_labels = read_training_data()
-    print(train_images.shape)
-    train_data = tuple(zip(train_images, train_labels))
-    testing_images, testing_labels = read_testing_data()
+    train_data = np.append(train_labels.reshape((1, len(train_labels))), train_images.T, axis = 0).T # each row is a training data
+
+    test_images, test_labels = read_testing_data()
+    # test_data = np.append(test_labels.reshape((1, len(test_labels))), test_images.T, axis = 0).T # each row is a testing data
     end = time.perf_counter()
     print(f"Finished reading all the images into the program, in {end - start} seconds")
-    
+
     # Train the Neural Network
     print("Starting to train the neural network")
-    neural_network = train_neural_network(train_images, train_labels, train_data, epochs)
+    neural_network = train_neural_network(train_images, train_labels, train_data, n_neurons, epochs)
     print("Finish training the neural network")
 
     """

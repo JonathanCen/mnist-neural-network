@@ -11,11 +11,11 @@ import matplotlib.pyplot as plt
 
 """
 Neural Network Design:
+Input layer: 
 """
 
 # preset the learning_rate, but will allow us to pass in a learning rate
-learning_rate, batch_size = 0.001, 100
-
+learning_rate = 0.001
 
 # timing how long each operation takes
 accum_time_FCL1_forward_prop = 0
@@ -68,53 +68,49 @@ class FullyConnectedLayer:
         return np.maximum(0, output)
 
     def forward_propagation(self, forward_pass_data, c_label) -> None:
-        # global accum_time_FCL1_forward_prop 
-        # global accum_time_FCL2_forward_prop
-
-        # start = time.perf_counter()
+        global accum_time_FCL1_forward_prop
+        global accum_time_FCL2_forward_prop
+        start = time.perf_counter()
         self.forward_pass_data = forward_pass_data
-        output = np.matmul(self.weights, forward_pass_data) + self.bias # allow there to be bias when testing and training data
+        output = np.matmul(self.weights, forward_pass_data)
         if not self.is_output_layer:
-            output = self.ReLU_activation_function(output)
-            if c_label: output *= self.dropout 
-        # end = time.perf_counter()
-
-        # if c_label:
-        #     if self.is_output_layer: accum_time_FCL2_forward_prop += (end - start)
-        #     else: accum_time_FCL1_forward_prop += (end - start)
-
-        return self.next_layer.forward_propagation(output, c_label)
+            output = self.ReLU_activation_function(output + self.bias)
+            if c_label:
+                output *= self.dropout 
+        end = time.perf_counter()
+        if c_label:
+            if self.n_neurons == 1024:
+                accum_time_FCL1_forward_prop += (end - start)
+            else:
+                accum_time_FCL2_forward_prop += (end - start)
+        prediction = self.next_layer.forward_propagation(output, c_label)
+        return prediction
 
     def backward_propagation(self, backward_pass_data) -> None:
-        # global accum_time_FCL1_backward_prop
-        # global accum_time_FCL2_backward_prop
-        """
-        downstream_deriv = np.matmul(self.weights.T, backward_pass_data)
-        self.avg_weights_deriv += np.matmul(backward_pass_data, self.forward_pass_data.T)/batch_size
-        self.avg_bias_deriv += (backward_pass_data/batch_size)
-        """
-        # start = time.perf_counter()
-
+        global accum_time_FCL1_backward_prop
+        global accum_time_FCL2_backward_prop
+        start = time.perf_counter()
         if self.is_output_layer:
+            # downstream_deriv = (np.matmul(backward_pass_data.T, self.weights)).T
             downstream_deriv = np.matmul(self.weights.T, backward_pass_data)
-            self.avg_weights_deriv += np.matmul(backward_pass_data, self.forward_pass_data.T)/batch_size
-            self.avg_bias_deriv += (backward_pass_data/batch_size)
+            self.avg_weights_deriv += np.matmul(backward_pass_data, self.forward_pass_data.T)/100
+            self.avg_bias_deriv += (backward_pass_data/100)
         else:
-            downstream_deriv = np.matmul(self.weights.T, self.dropout * backward_pass_data)
-            self.avg_weights_deriv += np.matmul((self.dropout * backward_pass_data), self.forward_pass_data.T)/batch_size
-            self.avg_bias_deriv += (backward_pass_data * self.dropout)/batch_size
-
-        # end = time.perf_counter()
-        # if not self.is_output_layer: accum_time_FCL1_backward_prop += (end - start)
-        # else: accum_time_FCL2_backward_prop += (end - start)
-
+            downstream_deriv = np.matmul(self.weights.T, self.dropout * backward_pass_data) # currently not needed
+            self.avg_weights_deriv += np.matmul((self.dropout * backward_pass_data), self.forward_pass_data.T)/100
+            self.avg_bias_deriv += (backward_pass_data * self.dropout)/100
+        end = time.perf_counter()
+        if self.n_neurons == 1024:
+            accum_time_FCL1_backward_prop += (end - start)
+        else:
+            accum_time_FCL2_backward_prop += (end - start)
         self.previous_layer.backward_propagation(downstream_deriv)
 
     def update_weights_and_bias(self, learning_rate) -> None:
         self.weights -= learning_rate * self.avg_weights_deriv
         self.bias -= learning_rate * self.avg_bias_deriv
-        self.avg_weights_deriv.fill(0.0)
-        self.avg_bias_deriv.fill(0.0)
+        self.avg_weights_deriv = np.zeros((self.n_neurons, self.n_incoming_neurons), dtype=np.float64)
+        self.avg_bias_deriv = np.zeros((self.n_neurons, 1), dtype=np.float64)
 
 
 class SoftMaxLayer:
@@ -132,32 +128,28 @@ class SoftMaxLayer:
         # self.forward_pass_output = np.exp(forward_pass_data) / sum(np.exp(forward_pass_data))
         # print(self.forward_pass_output)/
         """
-        # global accum_time_SML_forward_prop
-
-        # start = time.perf_counter()
+        global accum_time_SML_forward_prop
+        start = time.perf_counter()
         intermediate_output = np.exp(forward_pass_data - max(forward_pass_data))
         self.forward_pass_output = intermediate_output / sum(intermediate_output)
-        # end = time.perf_counter()
-        # accum_time_SML_forward_prop += (end-start)
-
+        end = time.perf_counter()
         if c_label:
+            accum_time_SML_forward_prop += (end-start)
             self.next_layer.forward_propagation(self.forward_pass_output, c_label)
-
         return self.extract_prediction()
 
     def backward_propagation(self, backward_pass_data) -> None:
-        # global accum_time_SML_backward_prop
-
-        # start = time.perf_counter()
+        global accum_time_SML_backward_prop
+        start = time.perf_counter()
         downstream_deriv = np.zeros((self.n_neurons, 1), dtype=np.float64)
-        downstream_deriv2 = np.zeros((self.n_neurons, 1), dtype=np.float64)
-        for neuron in range(self.n_neurons):
-            accum = backward_pass_data[neuron][0] * self.forward_pass_output[neuron][0] * (1 - self.forward_pass_output[neuron][0])
-            accum += (backward_pass_data.T.dot(self.forward_pass_output) * -self.forward_pass_output[neuron][0]) - (backward_pass_data[neuron][0] * self.forward_pass_output[neuron][0] * -self.forward_pass_output[neuron][0])
-            downstream_deriv[neuron][0] = accum
-        # end = time.perf_counter()
-
-        # accum_time_SML_backward_prop += (end-start)
+        for i in range(self.n_neurons):
+            accum = backward_pass_data[i][0] * self.forward_pass_output[i][0] * (1 - self.forward_pass_output[i][0])
+            forward_pass_output_remove_ith_column = np.delete(self.forward_pass_output, i, 0)
+            backward_pass_data_remove_ith_column = np.delete(backward_pass_data, i, 0).T
+            accum += (backward_pass_data_remove_ith_column.dot(forward_pass_output_remove_ith_column) * -self.forward_pass_output[i][0])
+            downstream_deriv[i][0] += accum
+        end = time.perf_counter()
+        accum_time_SML_backward_prop += (end-start)
         self.previous_layer.backward_propagation(downstream_deriv)
         
 
@@ -167,14 +159,12 @@ class CrossEntropyLayer:
         self.previous_layer = previous_layer
 
     def forward_propagation(self, forward_pass_data, c_label) -> None:
-        # global accum_time_CEL_forward_prop
-
-        # start = time.perf_counter()
+        global accum_time_CEL_forward_prop
+        start = time.perf_counter()
         downstream_deriv = np.zeros((self.n_neurons, 1), dtype=np.float64)
         downstream_deriv[c_label][0] = -1/forward_pass_data[c_label][0]
-        # end = time.perf_counter()
-
-        # accum_time_CEL_forward_prop += (end-start)
+        end = time.perf_counter()
+        accum_time_CEL_forward_prop += (end-start)
         self.previous_layer.backward_propagation(downstream_deriv)
 
 def read_int(file_pointer: gzip.GzipFile) -> int:  
@@ -183,8 +173,7 @@ def read_int(file_pointer: gzip.GzipFile) -> int:
     return int.from_bytes(file_pointer.read(4), "big")
 
 def normalize_images(images) -> np.ndarray:
-    # normalizerLambda = lambda x: (x/127.5) - 1
-    normalizerLambda = lambda x : x/255
+    normalizerLambda = lambda x: (x/255)
     return np.array(list(map(normalizerLambda, images)))
 
 def read_training_data() -> (np.ndarray, np.ndarray):
@@ -233,7 +222,7 @@ def read_training_data_slow(training_image_path: str, training_label_path: str) 
     return training_images, training_labels
 
 def print_current_metrics(epoch) -> None:
-    print("Some stats:")
+    print("\nSome stats:")
     print(f"avg_time_FCL1_forward_prop: {accum_time_FCL1_forward_prop/(epoch * 60000)}")
     print(f"avg_time_FCL2_forward_prop: {accum_time_FCL2_forward_prop/(epoch * 60000)}")
     print(f"avg_time_FCL1_backward_prop: {accum_time_FCL1_backward_prop/(epoch * 60000)}")
@@ -241,20 +230,23 @@ def print_current_metrics(epoch) -> None:
     print(f"avg_time_SML_forward_prop: {accum_time_SML_forward_prop/(epoch * 60000)}")
     print(f"avg_time_SML_backward_prop: {accum_time_SML_backward_prop/(epoch * 60000)}")
     print(f"avg_time_CEL_forward_prop: {accum_time_CEL_forward_prop/(epoch * 60000)}")
-    print()
 
 
 def connect_layers(list_layers) -> None:
     for i in range(len(list_layers)):
-        if i - 1 > -1: list_layers[i].previous_layer = list_layers[i-1]
-        if i + 1 < len(list_layers): list_layers[i].next_layer = list_layers[i+1]
+        if i - 1 > -1:
+            list_layers[i].previous_layer = list_layers[i-1]
+
+        if i + 1 < len(list_layers):
+            list_layers[i].next_layer = list_layers[i+1]
 
 
-def train_neural_network(training_images, training_labels, n_neurons, epochs, learning_rate = 0.001) -> None:
+def train_neural_network(training_images, training_labels, epochs, learning_rate = 0.001) -> None:
+    n_neuron = 128
     # Construct the Neural Network
     input_layer = InputLayer(784)
-    first_fully_connected_layer = FullyConnectedLayer(n_neurons, 784)
-    output_layer = FullyConnectedLayer(10, n_neurons, True)
+    first_fully_connected_layer = FullyConnectedLayer(n_neuron, 784)
+    output_layer = FullyConnectedLayer(10, n_neuron, True)
     softmax_layer = SoftMaxLayer(10)
     cross_entropy_layer = CrossEntropyLayer(10)
 
@@ -266,7 +258,6 @@ def train_neural_network(training_images, training_labels, n_neurons, epochs, le
     for epoch in range(1):
         print(f"\n----------------------- STARTING EPOCH {epoch} -------------------\n")
         start_time = time.perf_counter()
-
         for c_round in range(1):
             # test the neural network every 100 rounds for each epoch
             if c_round % 100 == 0:
@@ -286,7 +277,6 @@ def train_neural_network(training_images, training_labels, n_neurons, epochs, le
             first_fully_connected_layer.update_weights_and_bias(learning_rate)
             output_layer.update_weights_and_bias(learning_rate)
             
-
         end_time = time.perf_counter()
         print(f"This epoch took: {(end_time - start_time):0.6f}\n")
     """
@@ -338,11 +328,14 @@ def test_neural_network(testing_images, testing_labels, neural_network) -> None:
 
 
 def main() -> None:
-    print("Without dropout at all.")
-
+    """
+    if (len(sys.argv) < 5):
+        print("Too few args. Pass in ./program training_image_file training_label_file test_image_file test_label_file")
+        return 
+    """
+    
     # training_image_path, training_label_path, epochs = sys.argv[1], sys.argv[2], 20
     epochs = 20
-    n_neurons = 128
     
     start = time.perf_counter()
     # Read in training data
@@ -355,7 +348,7 @@ def main() -> None:
     
     # Train the Neural Network
     print("Starting to train the neural network")
-    neural_network = train_neural_network(training_images, training_labels, n_neurons, epochs)
+    neural_network = train_neural_network(training_images, training_labels, epochs)
     print("Finish training the neural network")
 
     # Test the Neural Network
