@@ -147,7 +147,7 @@ class SoftMaxLayer:
 
     def backward_propagation(self, backward_pass_data) -> None:
         global accum_time_SML_backward_prop
-        print('backpass: ', backward_pass_data)
+        # print('backpass: ', backward_pass_data)
         start = time.perf_counter()
         downstream_deriv = np.zeros((self.n_neurons, 1), dtype=np.float64)
         for neuron in range(self.n_neurons):
@@ -156,7 +156,7 @@ class SoftMaxLayer:
             downstream_deriv[neuron][0] = accum
         end = time.perf_counter()
         accum_time_SML_backward_prop += (end-start)
-        print(downstream_deriv)
+        # print(downstream_deriv)
         self.previous_layer.backward_propagation(downstream_deriv)
         
 
@@ -341,7 +341,7 @@ def main() -> None:
 
     # training_image_path, training_label_path, epochs = sys.argv[1], sys.argv[2], 20
     epochs = 20
-    n_neurons = 10
+    n_neurons = 128
     
     start = time.perf_counter()
     # Read in training data
