@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import random
 import time
+from sklearn.preprocessing import OneHotEncoder
 
 import gzip
 
@@ -22,6 +23,15 @@ Can try 2 things:
 learning_rate = 0.001
 batch_size = 100
 train_images, train_labels = None, None
+
+# timing how long each operation takes
+accum_time_FCL1_forward_prop = 0
+accum_time_FCL2_forward_prop = 0
+accum_time_FCL1_backward_prop = 0
+accum_time_FCL2_backward_prop = 0
+accum_time_SML_forward_prop = 0
+accum_time_SML_backward_prop = 0
+accum_time_CEL_forward_prop = 0
 
 class Neuron:
     def __init__(self) -> None:
@@ -44,15 +54,13 @@ class InputLayer:
     # training - pass in the (shuffled) train images to the next layer
     # testing - pass in the testing images to the next layer
     def forward_propagation(self, test_image = None, is_training = True) -> int:
-        # start_time = time.perf_counter()
-        # global train_images, train_labels
+        
         if is_training:
-            train_data = self.train_data[self.train_data_index : self.train_data_index + batch_size]
-            train_images = np.array(list(map(lambda x : x[0], train_data))).reshape((batch_size, 784, 1))
-            train_labels = np.array(list(map(lambda x : x[1], train_data)))
+            global train_images, train_labels
+            train_data = self.train_data[self.train_data_index : self.train_data_index + batch_size].T
+            train_images, train_labels = train_data[1:], train_data[0]
             self.train_data_index += batch_size
-        # end_time = time.perf_counter()
-        # print(f'Input layer took: {end_time - start_time}')
+
         return self.next_layer.forward_propagation(train_images, is_training) if is_training else self.next_layer.forward_propagation(test_image, is_training)
 
 
@@ -72,13 +80,13 @@ class FullyConnectedLayer:
         self.n_incoming_neurons = n_incoming_neurons
 
         # initialize weights, bias, and dropout (forward prop)
-        self.weights = np.random.rand(n_neurons, n_incoming_neurons) - .5
+        self.weights = np.random.rand(n_neurons, n_incoming_neurons) - .5 # (1024, 784)
         self.bias = np.random.rand(n_neurons, 1) - .5
         self.dropout = np.array(list(map(lambda x: 1/0.6 if x < 0.6 else 0, np.random.rand(n_neurons)))).reshape((n_neurons, 1))
 
         # ! possibly don't need this, because everytime we are going to just
-        self.avg_weights_deriv = None
-        self.avg_bias_deriv = None
+        # self.avg_weights_deriv = None
+        # self.avg_bias_deriv = None
         self.forward_pass_data = None
 
     def ReLU_activation_function(self, output):
@@ -87,39 +95,45 @@ class FullyConnectedLayer:
     # is_training - True, then modify the weights and bias
     #             - False, then return an array of predictions 
     def forward_propagation(self, forward_pass_data, is_training) -> None:
-        # start_time = time.perf_counter()
-        self.forward_pass_data = forward_pass_data
-        # print(self.weights.shape, forward_pass_data.shape, self.bias.shape)
-        output = np.matmul(self.weights, forward_pass_data) + self.bias
+        global accum_time_FCL1_forward_prop 
+        global accum_time_FCL2_forward_prop
+
+        start_time = time.perf_counter()
+
+        self.forward_pass_data = forward_pass_data # (784, 100)
+        output = self.weights.dot(forward_pass_data) + self.bias 
         if not self.is_output_layer:
             output = self.ReLU_activation_function(output) * self.dropout
-        # end_time = time.perf_counter()
-        # print(output.shape)
-        # print(f'FullyConnectedLayer {1 if self.n_neurons == 1024 else 2} took: {end_time - start_time}')
-        predictions = self.next_layer.forward_propagation(output, is_training)
-        return predictions
 
-    def backward_propagation(self, backward_pass_data) -> None:
-        global learning_rate
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
 
-        downstream_deriv = np.matmul(self.weights.T, backward_pass_data)
-
-        if self.is_output_layer:
-            self.avg_weights_deriv = np.sum(np.matmul(backward_pass_data, self.forward_pass_data.reshape((batch_size, 1, self.n_incoming_neurons))), axis=0)
-            self.avg_bias_deriv = np.sum(backward_pass_data, axis = 0)
-        else:
-            # downstream_deriv = np.matmul((self.dropout * backward_pass_data).T, self.weights)
-            self.avg_weights_deriv = np.sum(np.matmul((self.dropout * backward_pass_data), self.forward_pass_data.reshape((batch_size, 1, self.n_incoming_neurons))), axis=0)
-            self.avg_bias_deriv = np.sum(backward_pass_data * self.dropout, axis = 0)
+        if is_training:
+            if self.is_output_layer: accum_time_FCL2_forward_prop += total_time
+            else: accum_time_FCL1_forward_prop += total_time
         
-        self.update_weights_and_bias(learning_rate)
-        self.previous_layer.backward_propagation(downstream_deriv)
+        return self.next_layer.forward_propagation(output, is_training)
 
+    # ! Need to check the upstream_gradient computation
+    def backward_propagation(self, backward_pass_data) -> None:
+        upstream_gradient, avg_weights_deriv, avg_bias_deriv = None, None, None
+        if self.is_output_layer:
+            upstream_gradient = np.matmul(self.weights.T, backward_pass_data)
+            avg_weights_deriv = np.sum(np.matmul(backward_pass_data, self.forward_pass_data.reshape((batch_size, 1, self.n_incoming_neurons))), axis=0)
+            avg_bias_deriv = np.sum(backward_pass_data, axis = 0)
+        else:
+            upstream_gradient = np.matmul((self.dropout * backward_pass_data).T, self.weights) 
+            avg_weights_deriv = np.sum(np.matmul((self.dropout * backward_pass_data), self.forward_pass_data.reshape((batch_size, 1, self.n_incoming_neurons))), axis=0)
+            avg_bias_deriv = np.sum(backward_pass_data * self.dropout, axis = 0)
+        
+        # update the weights and bias 
+        self.weights -= learning_rate * self.avg_weights_deriv
+        self.bias -= learning_rate * self.avg_bias_deriv
 
+        self.previous_layer.backward_propagation(upstream_gradient)
+
+    # ! Not using this anymore
     def update_weights_and_bias(self, learning_rate) -> None:
-        # print("updating weights and bias")
-        # print(f"Avg weights deriv: {self.avg_weights_deriv}")
-        # print(f"Avg bias deriv: {self.avg_bias_deriv}")
         self.weights -= learning_rate * self.avg_weights_deriv
         self.bias -= learning_rate * self.avg_bias_deriv
         self.avg_weights_deriv = None
@@ -131,52 +145,87 @@ class SoftMaxLayer:
         self.n_neurons = n_neurons
         self.next_layer = next_layer
         self.previous_layer = previous_layer
-        self.forward_pass_output = None
+        self.forward_pass_output = None # softmax - (10, 100)
 
     def extract_prediction(self):
-        return self.forward_pass_output.argmax()
-        # return self.forward_pass_output.argmax(axis = 1).reshape(batch_size)
+        return self.forward_pass_output.argmax(axis = 0)
     
     def forward_propagation(self, forward_pass_data, is_training) -> None:
         """ # This is the formula I had when doing CUDA
         # self.forward_pass_output = np.exp(forward_pass_data) / sum(np.exp(forward_pass_data))
         # print(self.forward_pass_output)/
         """
-        # start_time = time.perf_counter()
-        # if batch_size == 1:
-        #     print(forward_pass_data.shape)
-        #     intermediate_output = np.exp(forward_pass_data - max(forward_pass_data))
-        #     self.forward_pass_output = intermediate_output / sum(intermediate_output)
-        # else:    
 
-        intermediate_output = np.exp(forward_pass_data.reshape((batch_size, self.n_neurons)) - np.array(list(map(lambda x : max(x), forward_pass_data))))
-        sum_intermediate_output = np.sum(intermediate_output, axis=1).reshape((batch_size, 1))
-        self.forward_pass_output = (intermediate_output / sum_intermediate_output).reshape((batch_size, self.n_neurons, 1))
-        print(intermediate_output.shape, self.forward_pass_output.shape)
+        global accum_time_SML_forward_prop
+        start_time = time.perf_counter()
 
-        # end_time = time.perf_counter()
-        # print(f'SoftMaxLayer took: {end_time - start_time}')
+        self.forward_pass_output = np.exp(forward_pass_data) / sum(np.exp(forward_pass_data))
 
-        return self.extract_prediction() if not is_training else self.next_layer.forward_propagation(self.forward_pass_output)
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+        if is_training:
+            accum_time_SML_forward_prop += total_time
 
+        return self.next_layer.forward_propagation(self.forward_pass_output) if is_training else self.extract_prediction()
+
+    # backward_pass_data - (10,100)
     def backward_propagation(self, backward_pass_data) -> None:
-        # start_time = time.perf_counter()
-        downstream_deriv = np.zeros((batch_size, self.n_neurons, 1), dtype=np.float64)
+        global accum_time_SML_backward_prop
+        start_time = time.perf_counter()
+        
+        upstream_gradient = np.zeros((self.n_neurons, batch_size))
+        softmax = self.forward_pass_output.T # (100, 10)
+        gradient = backward_pass_data.T # (100, 10)
+
+        print(f"softmax: {softmax}")
+        print(f"gradient: {gradient}")
+
+        """
+[2.37346418e-10 2.75264834e-11 9.99970009e-01 4.60658020e-12 2.62061065e-09 3.71386098e-08 2.52849346e-08 2.49914572e-05 1.84102599e-12 4.93387848e-06]
+
+        """
+
+        for train_index in range(batch_size):
+            softmax_ex = softmax[train_index] # (1, 10)
+            d_softmax_ex  = softmax_ex * np.identity(softmax_ex.size) - softmax_ex.T @ softmax_ex # (10, 10)
+
+            upstream_gradient_ex = d_softmax_ex @ gradient[train_index] # (10, 1)
+            upstream_gradient[np.arange(self.n_neurons), train_index] = upstream_gradient_ex
+
+            for i in range(self.n_neurons):
+                if upstream_gradient_ex[i] != upstream_gradient[i][train_index]:
+                    print(f"Incorrect: upstream: {upstream_gradient[i][train_index]}, my_comp: {upstream_gradient_ex[i]}")
+        
+        print("upstream_gradient", upstream_gradient)
 
         #! try to optimize this if possible
-        for train_index in range(batch_size):
+        # (100, 10, 1)
+        """ 
+        accum = backward_pass_data[neuron][0] * self.forward_pass_output[neuron][0] * (1 - self.forward_pass_output[neuron][0])
+        accum += (backward_pass_data.T.dot(self.forward_pass_output) * -self.forward_pass_output[neuron][0]) - (backward_pass_data[neuron][0] * self.forward_pass_output[neuron][0] * -self.forward_pass_output[neuron][0])
+        """
+        num_incorrect, train_index_incorrect = 0, []
+
+        downstream_deriv = np.zeros((self.n_neurons, batch_size))
+        for train_index_2 in range(batch_size):
             for neuron in range(self.n_neurons):
-                accum = (backward_pass_data[train_index].T.dot(self.forward_pass_output[train_index])) * -self.forward_pass_output[train_index][neuron][0]
+                accum = (gradient[train_index_2].dot(softmax[train_index_2]  * -softmax[train_index_2][neuron]))
 
                 # adjust for when neuron of SML = neuron of CEL
-                accum -= (backward_pass_data[train_index][neuron][0] * self.forward_pass_output[train_index][neuron][0] * -self.forward_pass_output[train_index][neuron][0])
-                accum += backward_pass_data[train_index][neuron][0] * self.forward_pass_output[train_index][neuron][0] * (1 - self.forward_pass_output[train_index][neuron][0])
+                accum -= (gradient[train_index_2][neuron] * softmax[train_index_2][neuron] * -softmax[train_index_2][neuron])
+                accum += gradient[train_index_2][neuron] * softmax[train_index_2][neuron] * (1 - softmax[train_index_2][neuron])
+                downstream_deriv[neuron][train_index_2] = accum
 
-                downstream_deriv[train_index][neuron][0] = accum
+                if accum != upstream_gradient[neuron][train_index_2]:
+                    print(f"Incorrect: {accum} {upstream_gradient[neuron][train_index_2]}")
+ 
 
-        # end_time = time.perf_counter()
+        print("downstream", downstream_deriv)
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+        accum_time_SML_backward_prop += total_time
         # print(f'SoftMaxLayer Back Prop took: {end_time - start_time}')
-        self.previous_layer.backward_propagation(downstream_deriv)
+        # self.previous_layer.backward_propagation(upstream_gradient)
         
 
 class CrossEntropyLayer:
@@ -184,27 +233,48 @@ class CrossEntropyLayer:
         self.n_neurons = n_neurons
         self.previous_layer = previous_layer
 
+    # ensure that the upstream_gradient has shape (10, batch_size)
+    def validate_upstream_gradient(self, upstream_gradient) -> None:
+        train_labels_set = set(train_labels)
+        for num in range(10):
+            if num not in train_labels_set:
+                upstream_gradient = np.insert(upstream_gradient, num, 0, axis = 0)
+                
+
+    # forward_pass_data - (10, batch_size) - every column is a training data, and every row represents a label
+    # upstream_gradient - (10, batch_size)
     def forward_propagation(self, forward_pass_data) -> None:
-        global train_labels
-        # print(forward_pass_data.shape)
-        downstream_deriv = np.zeros((batch_size, self.n_neurons, 1), dtype=np.float64)
+        global accum_time_CEL_forward_prop
+        start_time = time.perf_counter()
+
+        one_hot_encoder = OneHotEncoder(sparse = False)
+        upstream_gradient = one_hot_encoder.fit_transform(train_labels.reshape(batch_size, 1)).T * (-1/forward_pass_data)
+        # need to ensure that the upstream_gradient.shape === (10, batch_size) (if fewer than there is a number that is never shown in train_labels)
+        self.validate_upstream_gradient(upstream_gradient)
+
+        end_time = time.perf_counter()
+        total_time = end_time - start_time
+        accum_time_CEL_forward_prop += total_time
+
+        """
         for index, label in enumerate(train_labels):
-            if forward_pass_data[index][label][0] == 0:
+            label = int(label)
+            if label < 0 or label > 10:
+                print("Label is wrong")
+            # print(forward_pass_data[label][index], -1/forward_pass_data[label][index], upstream_gradient[label][index])
+            if (forward_pass_data[label][index] == 0) or (-1/forward_pass_data[label][index] != upstream_gradient[label][index]):
                 print(forward_pass_data[index])
                 print("WTF is going on here")
-            downstream_deriv[index][label][0] = -1/forward_pass_data[index][label][0]
         # print(train_labels[0])
-        # print(downstream_deriv[0])
-        self.previous_layer.backward_propagation(downstream_deriv)
+        # print(upstream_gradient[0])
+        """
 
-def read_int(file_pointer: gzip.GzipFile) -> int:  
-    """ Returns the int of the first 4 bytes
-    """
-    return int.from_bytes(file_pointer.read(4), "big")
+        self.previous_layer.backward_propagation(upstream_gradient)
 
-def normalize_images(images) -> np.ndarray:
-    normalizerLambda = lambda x: (x/127.5) - 1
-    return np.array(list(map(normalizerLambda, images)))
+""" --- Reading in training and testing images --- """
+# def normalize_images(images) -> np.ndarray:
+#     normalizerLambda = lambda x: (x/127.5) - 1
+#     return np.array(list(map(normalizerLambda, images)))
 
 def read_training_data() -> (np.ndarray, np.ndarray):
     """ Returns a numpy array of the training images and labels
@@ -220,44 +290,22 @@ def read_testing_data() -> (np.ndarray, np.ndarray):
         labels_path='./mnist/t10k-labels-idx1-ubyte')
     return testing_images/255, testing_labels
 
-def read_training_data_slow(training_image_path: str, training_label_path: str) -> None:
-    # Process the training images
-    with gzip.open(training_image_path, 'r') as reader:
-        # Read the meta data 
-        reader.read(4) # Read past the magic number
-        n_images, n_rows, n_cols = read_int(reader), read_int(reader), read_int(reader)
-
-        training_images = np.zero((n_rows, n_cols, n_images), dtype=np.float16)
-
-        for i in range(n_images):
-            buf = reader.read(n_rows * n_cols)
-            tmp_image = np.frombuffer(buf, dtype=np.uint8).reshape(n_rows, n_cols)
-            for row in range(n_rows):
-                for col in range(n_cols):
-                    # Normalize the values from -1 to 1
-                    training_images[row][col][i] = tmp_image[row][col]/127.5 - 1
-    
-    print('Finishing processing training images')
-
-    # Process the training labels
-    with gzip.open(training_label_path, 'r') as reader:
-        # Read the meta data 
-        reader.read(4) # Read past the magic number
-        n_labels = read_int(reader)
-        buf = reader.read(n_labels)
-        training_labels = np.frombuffer(buf, dtype=np.uint8)
-
-    print('Finishing processing training labels')
-
-    return training_images, training_labels
+""" --- Training the NN --- """
+def print_current_metrics(epoch) -> None:
+    print("Some stats:")
+    print(f"avg_time_FCL1_forward_prop: {accum_time_FCL1_forward_prop/(epoch * 60000)}")
+    print(f"avg_time_FCL2_forward_prop: {accum_time_FCL2_forward_prop/(epoch * 60000)}")
+    print(f"avg_time_FCL1_backward_prop: {accum_time_FCL1_backward_prop/(epoch * 60000)}")
+    print(f"avg_time_FCL2_backward_prop: {accum_time_FCL2_backward_prop/(epoch * 60000)}")
+    print(f"avg_time_SML_forward_prop: {accum_time_SML_forward_prop/(epoch * 60000)}")
+    print(f"avg_time_SML_backward_prop: {accum_time_SML_backward_prop/(epoch * 60000)}")
+    print(f"avg_time_CEL_forward_prop: {accum_time_CEL_forward_prop/(epoch * 60000)}")
+    print()
 
 def connect_layers(list_layers) -> None:
     for i in range(len(list_layers)):
-        if i - 1 > -1:
-            list_layers[i].previous_layer = list_layers[i-1]
-
-        if i + 1 < len(list_layers):
-            list_layers[i].next_layer = list_layers[i+1]
+        if i - 1 > -1: list_layers[i].previous_layer = list_layers[i-1]
+        if i + 1 < len(list_layers): list_layers[i].next_layer = list_layers[i+1]
 
 
 def train_neural_network(train_images, train_labels, train_data, epochs, n_neurons, learning_rate = 0.001) -> None:
@@ -301,6 +349,7 @@ def train_neural_network(train_images, train_labels, train_data, epochs, n_neuro
 
         end_time = time.perf_counter()
         print(f"This epoch took: {(end_time - start_time):0.6f}\n")
+        print_current_metrics(epoch+1)
 
     return input_layer
 
@@ -316,7 +365,7 @@ def main() -> None:
     """
     
     # training_image_path, training_label_path, epochs = sys.argv[1], sys.argv[2], 20
-    epochs, n_neurons = 20, 128
+    epochs, n_neurons = 1, 128
     
     start = time.perf_counter()
     # Read in training data
@@ -331,7 +380,7 @@ def main() -> None:
 
     # Train the Neural Network
     print("Starting to train the neural network")
-    neural_network = train_neural_network(train_images, train_labels, train_data, n_neurons, epochs)
+    neural_network = train_neural_network(train_images, train_labels, train_data, epochs, n_neurons)
     print("Finish training the neural network")
 
     """
