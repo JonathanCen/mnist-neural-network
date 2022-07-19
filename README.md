@@ -34,9 +34,9 @@ Feel free to check the [issues page](https://github.com/JonathanCen/mnist-neural
 
 ## Authors
 
-- _Jonathan Cen_ - [LinkedIn](https://www.linkedin.com/in/jonathancen/), [Github](https://github.com/JonathanCen)
+- [**Jonathan Cen**](https://jonathancen.me/) - [LinkedIn](https://www.linkedin.com/in/jonathancen/), [Github](https://github.com/JonathanCen)
 
 ## License
 
-Copyright © 2019 [Jonathan Cen](<ADD PERSONAL WEBSITE LINK>).\
+Copyright © 2019 [Jonathan Cen](https://jonathancen.me/).\
 This project is [MIT licensed](https://github.com/JonathanCen/mnist-neural-network/blob/main/LICENSE).
